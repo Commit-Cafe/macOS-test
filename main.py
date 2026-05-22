@@ -283,38 +283,14 @@ class USBDetector:
 class WeChatPathFinder:
     @staticmethod
     def find_wechat_paths():
-        paths = []
         home = os.path.expanduser("~")
-
         mac_paths = [
             os.path.join(home, "Library", "Containers", "com.tencent.xinWeChat",
                          "Data", "Library", "Application Support", "com.tencent.xinWeChat"),
             os.path.join(home, "Library", "Containers", "com.tencent.xinWeChat",
                          "Data", "Documents"),
         ]
-
-        for base in mac_paths:
-            if not os.path.exists(base):
-                continue
-            for root, dirs, files in os.walk(base):
-                depth = root.replace(base, "").count(os.sep)
-                if depth > 5:
-                    dirs[:] = []
-                    continue
-                dirs[:] = [d for d in dirs if not d.startswith(".")]
-                if "FileStorage" in root or "Message" in root or "Attachment" in root:
-                    paths.append(root)
-                if root.endswith("File") or root.endswith("Files"):
-                    if base not in paths:
-                        paths.append(root)
-
-        seen = set()
-        unique = []
-        for p in paths:
-            if p not in seen:
-                seen.add(p)
-                unique.append(p)
-        return unique
+        return [p for p in mac_paths if os.path.exists(p)]
 
 
 class BackupEngine:
