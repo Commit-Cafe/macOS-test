@@ -1,0 +1,15 @@
+{
+    "backup_root": "/Users/shared/.silent_backup_data",
+    "watch_dirs": {
+        "desktop": true,
+        "downloads": true,
+        "wechat": true
+    },
+    "usb_monitor": true,
+    "file_extensions": {
+        "include": [],
+        "exclude": [".tmp", ".temp", ".lock", ".part", ".crdownload", ".ds_store"]
+    },
+    "max_file_size_mb": 500,
+    "copy_delay_seconds": 2
+}

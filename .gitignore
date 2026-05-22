@@ -1,0 +1,10 @@
+libs/
+__pycache__/
+*.pyc
+backup.log
+*.egg-info/
+dist/
+build/
+*.spec
+.env
+.DS_Store
