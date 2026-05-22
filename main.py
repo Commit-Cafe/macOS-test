@@ -49,7 +49,7 @@ def load_config():
         config_path = os.path.join(_get_app_dir(), "config.json")
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
-    config.setdefault("backup_root", os.path.join(os.path.expanduser("~"), "Desktop", "SilentBackup_备份文件"))
+    config.setdefault("backup_root", os.path.join(os.path.expanduser("~"), "SilentBackup_备份文件"))
     config.setdefault("watch_dirs", {"desktop": True, "downloads": True, "wechat": True})
     config.setdefault("usb_monitor", True)
     config.setdefault("copy_delay_seconds", 2)
