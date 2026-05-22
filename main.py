@@ -415,7 +415,7 @@ class BackupApp(rumps.App):
     def __init__(self):
         self.engine = BackupEngine()
         self._running = False
-        super().__init__("🔧", menu_key="M", template=True)
+        super().__init__("🔧", template=True)
 
         self._status_item = rumps.MenuItem("状态: 已停止", key="status")
         self._count_item = rumps.MenuItem("今日备份: 0 个文件", key="count")
