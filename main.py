@@ -432,9 +432,6 @@ class BackupApp(rumps.App):
             rumps.MenuItem("退出", callback=self._quit),
         ]
 
-        self._status_item.set_enabled(False)
-        self._count_item.set_enabled(False)
-
         self._update_timer = rumps.Timer(self._update_status, 5)
         self._update_timer.start()
 
