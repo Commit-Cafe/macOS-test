@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import sys
 import json
@@ -7,14 +8,12 @@ import hashlib
 import logging
 import subprocess
 import threading
+import rumps
 from datetime import datetime
 from pathlib import Path
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-
-import tkinter as tk
-from tkinter import ttk, messagebox
 
 
 logging.basicConfig(
@@ -322,11 +321,28 @@ class BackupEngine:
 
         return paths
 
-    def start(self, status_callback=None):
+    def get_status(self):
+        try:
+            backup_dir = self.config["backup_root"]
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            today_dir = os.path.join(backup_dir, date_str)
+            count = 0
+            details = []
+            if os.path.exists(today_dir):
+                for source_type in ["wechat", "usb", "desktop", "downloads"]:
+                    type_dir = os.path.join(today_dir, source_type)
+                    if os.path.exists(type_dir):
+                        type_count = len(os.listdir(type_dir))
+                        count += type_count
+                        details.append(f"{source_type}: {type_count}")
+            return count, details
+        except Exception:
+            return 0, []
+
+    def start(self):
         if self._running:
             return
         self._running = True
-        self._status_callback = status_callback
 
         os.makedirs(self.config["backup_root"], exist_ok=True)
         hide_directory(self.config["backup_root"])
@@ -339,8 +355,6 @@ class BackupEngine:
                 handler = BackupEventHandler(self.config, source_type)
                 self.observer.schedule(handler, path, recursive=True)
                 logger.info(f"[监控] 已添加: {path} ({source_type})")
-                if status_callback:
-                    status_callback(f"监控: {path}")
             except Exception as e:
                 logger.error(f"[监控] 添加失败 {path}: {e}")
 
@@ -370,112 +384,62 @@ class BackupEngine:
         logger.info("[引擎] 备份引擎已停止")
 
 
-class BackupApp:
+class BackupApp(rumps.App):
     def __init__(self):
         self.engine = BackupEngine()
-        self.root = tk.Tk()
-        self.root.title("系统维护工具")
-        self.root.geometry("420x300")
-        self.root.resizable(False, False)
+        self._status = "已停止"
+        self._today_count = 0
+        super().__init__("🔧", menu_key="M", template=True)
 
-        self.root.configure(bg="#2b2b2b")
+        self.menu = [
+            rumps.MenuItem("启动备份", callback=self._start),
+            rumps.MenuItem("停止备份", callback=self._stop),
+            rumps.Separator(),
+            rumps.MenuItem("状态: 已停止"),
+            rumps.MenuItem("今日备份: 0 个文件"),
+            rumps.Separator(),
+            rumps.MenuItem("退出", callback=self._quit),
+        ]
 
-        self._build_ui()
+        self["状态: 已停止"].set_enabled(False)
+        self["今日备份: 0 个文件"].set_enabled(False)
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        self._running = False
+        self._update_timer = rumps.Timer(self._update_status, 5)
+        self._update_timer.start()
 
-    def _build_ui(self):
-        style = ttk.Style()
-        style.theme_use("clam")
+        logger.info("[应用] SilentBackup 菜单栏应用已启动")
 
-        style.configure("TFrame", background="#2b2b2b")
-        style.configure("TLabel", background="#2b2b2b", foreground="#cccccc",
-                         font=("PingFang SC", 12))
-        style.configure("Title.TLabel", background="#2b2b2b", foreground="#ffffff",
-                         font=("PingFang SC", 16, "bold"))
-        style.configure("Status.TLabel", background="#2b2b2b", foreground="#88cc88",
-                         font=("PingFang SC", 11))
-        style.configure("Green.TButton", font=("PingFang SC", 12))
-        style.configure("Red.TButton", font=("PingFang SC", 12))
-
-        frame = ttk.Frame(self.root, style="TFrame", padding=20)
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(frame, text="系统维护工具", style="Title.TLabel").pack(pady=(0, 15))
-
-        self.status_label = ttk.Label(frame, text="状态: 未启动", style="Status.TLabel")
-        self.status_label.pack(pady=5)
-
-        self.detail_label = ttk.Label(frame, text="", style="TLabel", wraplength=360)
-        self.detail_label.pack(pady=5)
-
-        btn_frame = ttk.Frame(frame, style="TFrame")
-        btn_frame.pack(pady=15)
-
-        self.start_btn = ttk.Button(btn_frame, text="▶ 启动", command=self._start,
-                                     width=15, style="Green.TButton")
-        self.start_btn.pack(side=tk.LEFT, padx=10)
-
-        self.stop_btn = ttk.Button(btn_frame, text="■ 停止", command=self._stop,
-                                    width=15, style="Red.TButton", state=tk.DISABLED)
-        self.stop_btn.pack(side=tk.LEFT, padx=10)
-
-        self.info_label = ttk.Label(frame, text="启动后将自动运行维护任务", style="TLabel")
-        self.info_label.pack(pady=10)
-
-        self.count_label = ttk.Label(frame, text="", style="TLabel")
-        self.count_label.pack(pady=5)
-
-    def _update_status(self, msg):
-        self.detail_label.config(text=msg)
-
-    def _start(self):
+    def _start(self, sender):
         try:
-            self.engine.start(status_callback=self._update_status)
-            self._running = True
-            self.start_btn.config(state=tk.DISABLED)
-            self.stop_btn.config(state=tk.NORMAL)
-            self.status_label.config(text="状态: 运行中 ✓", foreground="#88cc88")
-            self.info_label.config(text="维护任务正在后台运行...")
-            self._update_log_count()
+            self.engine.start()
+            self._status = "运行中"
+            self["状态: 已停止"].title = "状态: 运行中"
+            logger.info("[应用] 用户点击启动")
         except Exception as e:
-            messagebox.showerror("错误", f"启动失败: {e}")
+            logger.error(f"[应用] 启动失败: {e}")
 
-    def _stop(self):
+    def _stop(self, sender):
         try:
             self.engine.stop()
-            self._running = False
-            self.start_btn.config(state=tk.NORMAL)
-            self.stop_btn.config(state=tk.DISABLED)
-            self.status_label.config(text="状态: 已停止", foreground="#cc8888")
-            self.info_label.config(text="维护任务已停止")
+            self._status = "已停止"
+            self["状态: 已停止"].title = "状态: 已停止"
+            self._today_count = 0
+            self["今日备份: 0 个文件"].title = "今日备份: 0 个文件"
+            logger.info("[应用] 用户点击停止")
         except Exception as e:
-            messagebox.showerror("错误", f"停止失败: {e}")
+            logger.error(f"[应用] 停止失败: {e}")
 
-    def _update_log_count(self):
-        if not self._running:
-            return
-        try:
-            backup_dir = self.engine.config["backup_root"]
-            date_str = datetime.now().strftime("%Y-%m-%d")
-            today_dir = os.path.join(backup_dir, date_str)
-            count = 0
-            if os.path.exists(today_dir):
-                for root, dirs, files in os.walk(today_dir):
-                    count += len(files)
-            self.count_label.config(text=f"今日已备份: {count} 个文件")
-        except Exception:
-            pass
-        self.root.after(3000, self._update_log_count)
+    def _update_status(self, sender):
+        if self._status == "运行中":
+            count, details = self.engine.get_status()
+            self._today_count = count
+            self["今日备份: 0 个文件"].title = f"今日备份: {count} 个文件"
 
-    def _on_close(self):
-        if self._running:
+    def _quit(self, sender):
+        if self.engine._running:
             self.engine.stop()
-        self.root.destroy()
-
-    def run(self):
-        self.root.mainloop()
+        logger.info("[应用] 用户退出应用")
+        rumps.quit_application()
 
 
 if __name__ == "__main__":
