@@ -1,5 +1,5 @@
 {
-    "backup_root": "/Users/shared/.silent_backup_data",
+    "backup_root": "~/Desktop/SilentBackup_备份文件",
     "watch_dirs": {
         "desktop": true,
         "downloads": true,
