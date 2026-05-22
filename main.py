@@ -420,13 +420,15 @@ class BackupApp(rumps.App):
         self._status_item = rumps.MenuItem("状态: 已停止", key="status")
         self._count_item = rumps.MenuItem("今日备份: 0 个文件", key="count")
 
+        sep = rumps.separator
+
         self.menu = [
             rumps.MenuItem("启动备份", callback=self._start),
             rumps.MenuItem("停止备份", callback=self._stop),
-            rumps.Separator(),
+            sep,
             self._status_item,
             self._count_item,
-            rumps.Separator(),
+            sep,
             rumps.MenuItem("退出", callback=self._quit),
         ]
 
