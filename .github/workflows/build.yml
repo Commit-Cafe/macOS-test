@@ -1,0 +1,73 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip3 install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pip3 install pyinstaller
+          pyinstaller \
+            --onefile \
+            --noconsole \
+            --osx-bundle-identifier "com.silentbackup" \
+            --name "SilentBackup" \
+            main.py
+
+      - name: Create macOS app directory
+        run: |
+          mkdir -p dist/SilentBackup.app/Contents/MacOS
+          cp dist/main dist/SilentBackup.app/Contents/MacOS/SilentBackup
+          cp Info.plist dist/SilentBackup.app/Contents/Info.plist
+
+      - name: Create Info.plist
+        run: |
+          cat > dist/SilentBackup.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>SilentBackup</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.silentbackup</string>
+            <key>CFBundleName</key>
+            <string>SilentBackup</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>10.15</string>
+            <key>LSUIElement</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SilentBackup-macOS
+          path: dist/SilentBackup.app
+          retention-days: 7
