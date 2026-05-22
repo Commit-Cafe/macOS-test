@@ -32,14 +32,10 @@ jobs:
             --name "SilentBackup" \
             main.py
 
-      - name: Create macOS app directory
+      - name: Create macOS .app bundle
         run: |
           mkdir -p dist/SilentBackup.app/Contents/MacOS
-          cp dist/main dist/SilentBackup.app/Contents/MacOS/SilentBackup
-          cp Info.plist dist/SilentBackup.app/Contents/Info.plist
-
-      - name: Create Info.plist
-        run: |
+          cp dist/SilentBackup dist/SilentBackup.app/Contents/MacOS/SilentBackup
           cat > dist/SilentBackup.app/Contents/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

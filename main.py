@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import sys
 import json
 import time
 import shutil
@@ -8,19 +7,26 @@ import hashlib
 import logging
 import subprocess
 import threading
-import rumps
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from pathlib import Path
 
+import rumps
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+
+def _get_log_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup.log")
 
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup.log"), encoding="utf-8"),
+        RotatingFileHandler(
+            _get_log_path(), encoding="utf-8",
+            maxBytes=5 * 1024 * 1024, backupCount=3
+        ),
         logging.StreamHandler()
     ]
 )
@@ -30,11 +36,18 @@ logger = logging.getLogger("SilentBackup")
 def load_config():
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
     with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        config = json.load(f)
+    config.setdefault("backup_root", os.path.join(os.path.expanduser("~"), ".silent_backup_data"))
+    config.setdefault("watch_dirs", {"desktop": True, "downloads": True, "wechat": True})
+    config.setdefault("usb_monitor", True)
+    config.setdefault("copy_delay_seconds", 2)
+    config.setdefault("max_file_size_mb", 500)
+    config.setdefault("file_extensions", {"include": [], "exclude": []})
+    return config
 
 
 def get_file_hash(filepath):
-    h = hashlib.md5()
+    h = hashlib.sha256()
     try:
         with open(filepath, "rb") as f:
             while True:
@@ -125,18 +138,29 @@ class BackupEventHandler(FileSystemEventHandler):
         self.source_type = source_type
         self._recent_files = {}
         self._lock = threading.Lock()
+        self._last_cleanup = 0.0
+
+    def _cleanup_recent(self, now):
+        if now - self._last_cleanup < 60:
+            return
+        self._last_cleanup = now
+        stale = [k for k, v in self._recent_files.items() if now - v > 120]
+        for k in stale:
+            del self._recent_files[k]
 
     def _handle_file(self, event):
         if event.is_directory:
             return
         src_path = event.src_path
         delay = self.config.get("copy_delay_seconds", 2)
+        now = time.time()
 
         with self._lock:
+            self._cleanup_recent(now)
             if src_path in self._recent_files:
-                if time.time() - self._recent_files[src_path] < delay:
+                if now - self._recent_files[src_path] < delay:
                     return
-            self._recent_files[src_path] = time.time()
+            self._recent_files[src_path] = now
 
         if not os.path.exists(src_path):
             return
@@ -152,8 +176,11 @@ class BackupEventHandler(FileSystemEventHandler):
         self._handle_file(event)
 
     def on_moved(self, event):
-        if not event.is_directory:
-            self._handle_file(event)
+        if event.is_directory:
+            return
+        self._handle_file(event)
+        if os.path.exists(event.dest_path):
+            silent_copy(event.dest_path, self.config, self.source_type)
 
 
 class USBDetector:
@@ -164,6 +191,7 @@ class USBDetector:
         self._thread = None
         self._known_volumes = set()
         self._scanned_files = set()
+        self._scan_lock = threading.Lock()
 
     def _get_removable_volumes(self):
         volumes = set()
@@ -183,21 +211,6 @@ class USBDetector:
             logger.error(f"[USB] 获取卷列表失败: {e}")
         return volumes
 
-    def _is_removable(self, mount_point):
-        try:
-            result = subprocess.run(
-                ["diskutil", "info", mount_point],
-                capture_output=True, text=True, timeout=5
-            )
-            output = result.stdout.lower()
-            if "removable" in output or "external" in output:
-                return True
-            if "type: virtual" in output:
-                return False
-            return False
-        except Exception:
-            return False
-
     def _scan_volume(self, volume_path):
         logger.info(f"[USB] 扫描外接磁盘: {volume_path}")
         count = 0
@@ -212,10 +225,12 @@ class USBDetector:
                         file_key = f"{fpath}_{os.path.getmtime(fpath)}"
                     except OSError:
                         continue
-                    if file_key not in self._scanned_files:
+                    with self._scan_lock:
+                        if file_key in self._scanned_files:
+                            continue
                         self._scanned_files.add(file_key)
-                        if silent_copy(fpath, self.config, "usb"):
-                            count += 1
+                    if silent_copy(fpath, self.config, "usb"):
+                        count += 1
         except PermissionError:
             logger.warning(f"[USB] 权限不足，跳过部分目录: {volume_path}")
         logger.info(f"[USB] 外接磁盘 {volume_path} 扫描完成, 备份了 {count} 个文件")
@@ -274,9 +289,7 @@ class WeChatPathFinder:
                 if depth > 5:
                     dirs[:] = []
                     continue
-                for d in dirs:
-                    if d.startswith("."):
-                        continue
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
                 if "FileStorage" in root or "Message" in root or "Attachment" in root:
                     paths.append(root)
                 if root.endswith("File") or root.endswith("Files"):
@@ -332,7 +345,9 @@ class BackupEngine:
                 for source_type in ["wechat", "usb", "desktop", "downloads"]:
                     type_dir = os.path.join(today_dir, source_type)
                     if os.path.exists(type_dir):
-                        type_count = len(os.listdir(type_dir))
+                        type_count = 0
+                        for _, _, files in os.walk(type_dir):
+                            type_count += len(files)
                         count += type_count
                         details.append(f"{source_type}: {type_count}")
             return count, details
@@ -387,22 +402,24 @@ class BackupEngine:
 class BackupApp(rumps.App):
     def __init__(self):
         self.engine = BackupEngine()
-        self._status = "已停止"
-        self._today_count = 0
+        self._running = False
         super().__init__("🔧", menu_key="M", template=True)
+
+        self._status_item = rumps.MenuItem("状态: 已停止", key="status")
+        self._count_item = rumps.MenuItem("今日备份: 0 个文件", key="count")
 
         self.menu = [
             rumps.MenuItem("启动备份", callback=self._start),
             rumps.MenuItem("停止备份", callback=self._stop),
             rumps.Separator(),
-            rumps.MenuItem("状态: 已停止"),
-            rumps.MenuItem("今日备份: 0 个文件"),
+            self._status_item,
+            self._count_item,
             rumps.Separator(),
             rumps.MenuItem("退出", callback=self._quit),
         ]
 
-        self["状态: 已停止"].set_enabled(False)
-        self["今日备份: 0 个文件"].set_enabled(False)
+        self._status_item.set_enabled(False)
+        self._count_item.set_enabled(False)
 
         self._update_timer = rumps.Timer(self._update_status, 5)
         self._update_timer.start()
@@ -412,8 +429,8 @@ class BackupApp(rumps.App):
     def _start(self, sender):
         try:
             self.engine.start()
-            self._status = "运行中"
-            self["状态: 已停止"].title = "状态: 运行中"
+            self._running = True
+            self._status_item.title = "状态: 运行中"
             logger.info("[应用] 用户点击启动")
         except Exception as e:
             logger.error(f"[应用] 启动失败: {e}")
@@ -421,19 +438,17 @@ class BackupApp(rumps.App):
     def _stop(self, sender):
         try:
             self.engine.stop()
-            self._status = "已停止"
-            self["状态: 已停止"].title = "状态: 已停止"
-            self._today_count = 0
-            self["今日备份: 0 个文件"].title = "今日备份: 0 个文件"
+            self._running = False
+            self._status_item.title = "状态: 已停止"
+            self._count_item.title = "今日备份: 0 个文件"
             logger.info("[应用] 用户点击停止")
         except Exception as e:
             logger.error(f"[应用] 停止失败: {e}")
 
     def _update_status(self, sender):
-        if self._status == "运行中":
-            count, details = self.engine.get_status()
-            self._today_count = count
-            self["今日备份: 0 个文件"].title = f"今日备份: {count} 个文件"
+        if self._running:
+            count, _details = self.engine.get_status()
+            self._count_item.title = f"今日备份: {count} 个文件"
 
     def _quit(self, sender):
         if self.engine._running:
