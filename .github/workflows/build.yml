@@ -36,6 +36,7 @@ jobs:
             --onefile \
             --noconsole \
             --target-architecture ${{ matrix.arch }} \
+            --add-data "config.json:." \
             --osx-bundle-identifier "com.silentbackup" \
             --name "SilentBackup" \
             main.py

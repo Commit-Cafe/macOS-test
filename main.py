@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 import json
 import time
 import shutil
@@ -15,8 +16,16 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 
-def _get_log_path():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup.log")
+def _get_app_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _get_data_dir():
+    d = os.path.join(os.path.expanduser("~"), "Library", "Logs", "SilentBackup")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 logging.basicConfig(
@@ -24,7 +33,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         RotatingFileHandler(
-            _get_log_path(), encoding="utf-8",
+            os.path.join(_get_data_dir(), "backup.log"), encoding="utf-8",
             maxBytes=5 * 1024 * 1024, backupCount=3
         ),
         logging.StreamHandler()
@@ -34,7 +43,10 @@ logger = logging.getLogger("SilentBackup")
 
 
 def load_config():
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    if getattr(sys, "frozen", False):
+        config_path = os.path.join(sys._MEIPASS, "config.json")
+    else:
+        config_path = os.path.join(_get_app_dir(), "config.json")
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
     config.setdefault("backup_root", os.path.join(os.path.expanduser("~"), ".silent_backup_data"))
