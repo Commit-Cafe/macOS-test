@@ -1,0 +1,88 @@
+name: Build macOS App
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-13
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install py2app
+
+      - name: Build .app with py2app
+        run: |
+          python setup_py2app.py py2app
+
+      - name: Verify build
+        run: |
+          ls -la dist/
+          if [ -d "dist/FileWatcherMac.app" ]; then
+            echo "Build successful!"
+          else
+            echo "Build failed - .app not found"
+            exit 1
+          fi
+
+      - name: Create DMG (optional)
+        run: |
+          brew install create-dmg 2>/dev/null || true
+          create-dmg \
+            --volname "FileWatcherMac" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "FileWatcherMac.app" 175 190 \
+            --app-drop-link 425 190 \
+            "dist/FileWatcherMac.dmg" \
+            "dist/FileWatcherMac.app" || {
+              echo "DMG creation failed, falling back to ZIP"
+              cd dist && zip -r FileWatcherMac.zip FileWatcherMac.app && cd ..
+            }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileWatcherMac-macOS
+          path: |
+            dist/FileWatcherMac.dmg
+            dist/FileWatcherMac.zip
+          if-no-files-found: warn
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/FileWatcherMac.dmg
+            dist/FileWatcherMac.zip
+          body: |
+            ## FileWatcherMac - macOS 文件自动复制监控工具
+
+            ### 安装方法
+            1. 下载 `.dmg` 文件
+            2. 双击打开，拖动到「应用程序」文件夹
+            3. 首次打开需右键 → 「打开」（绕过 Gatekeeper）
+
+            ### 使用方法
+            1. 启动后菜单栏出现 📁 图标
+            2. 设置「目标文件夹」（要监控的文件夹）
+            3. 设置「复制文件夹」（备份存放位置）
+            4. 点击「开始监控」
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
